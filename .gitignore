@@ -3,3 +3,4 @@
 venv
 .csv
 .xlsx
+out_data
