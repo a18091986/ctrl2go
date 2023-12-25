@@ -12,6 +12,80 @@ env = dotenv.dotenv_values('../.env')
 auth_key = env.get("AUTH_TOKEN")
 
 
+def get_list_of_districts_ids(project_title: str = 'Rabi 2022-23') -> list[str, ...]:
+    url = f"http://45.89.26.151:3001/api/projectsJSON?namep={project_title}"
+    headers = {
+        'comp_name': 'WP',
+        'Authorization': f'Bearer {auth_key}'
+    }
+    payload = {}
+    response = requests.request("GET", url, headers=headers, data=payload)
+    return [x.get('code_devision') for x in response.json().get('projects')[0].get('atd_units')]
+    # print(json.dumps(response.json(), indent=3))
+
+
+district_ids = get_list_of_districts_ids()
+
+
+def get_blocks_by_district(district_ids: list[str, ...]) -> pd.DataFrame:
+    result_df = pd.DataFrame()
+    base_url = f"http://45.89.26.151:3001/api/blocks"
+    headers = {
+        'comp_name': 'WP',
+        'Authorization': f'Bearer {auth_key}'
+    }
+    payload = {}
+    for d_id in district_ids:
+        url = '?'.join([base_url, f"idd={d_id}"])
+        response = requests.request("GET", url, headers=headers, data=payload)
+        if response.status_code != 200:
+            print(f"Error: Unable to get blocks by district for {d_id}. {response.content}")
+            continue
+        if result_df.empty:
+            result_df = pd.DataFrame(response.json().get('blocks'))
+            continue
+        result_df = pd.concat([result_df, pd.DataFrame(response.json().get('blocks'))], ignore_index=True)
+
+    return result_df
+
+
+print(get_blocks_by_district(district_ids).shape)
+
+
+def get_coords_of_polygon_center_of_block():
+    url = "http://45.89.26.151:3001/api/polycenter?idb=4045"
+    headers = {
+        'comp_name': 'WP',
+        'Authorization': f'Bearer {auth_key}'
+    }
+    payload = {}
+    response = requests.request("GET", url, headers=headers, data=payload)
+    print(pd.DataFrame(response.json()))
+
+
+# def get_gp_by_district():
+#     url = "http://45.89.26.151:3001/api/grams?idd=437"
+#     headers = {
+#         'comp_name': 'WP',
+#         'Authorization': f'Bearer {auth_key}'
+#     }
+#     payload = {}
+#     response = requests.request("GET", url, headers=headers, data=payload)
+#     # print(json.dumps(response.json(), indent=3))
+#     print(pd.DataFrame(response.json().get('grams')))
+
+# def get_coords_of_polygon_center_of_gp():
+#     url = "http://45.89.26.151:3001/api/grams?idd=437"
+#     headers = {
+#         'comp_name': 'WP',
+#         'Authorization': f'Bearer {auth_key}'
+#     }
+#     payload = {}
+#     response = requests.request("GET", url, headers=headers, data=payload)
+#     # print(json.dumps(response.json(), indent=3))
+#     print(pd.DataFrame(response.json().get('grams')))
+
+
 def get_history_weather(datamode: str = 'bilinear', src_id: int = 2,
                         geo_points: Tuple[Tuple[float | int, float | int], ...] = ((28.632854, 77.219721),),
                         start_date: str = "1990-01-01", end_date: str = "1990-01-03",
@@ -67,21 +141,23 @@ def get_history_weather(datamode: str = 'bilinear', src_id: int = 2,
     weather_hist.to_csv(Path(dir_to_save, f"weather_{datetime.now().strftime('%Y%m%d__%H%M%S')}.csv"))
     return weather_hist
 
+# if __name__ == '__main__':
+# get_districts()
+# get_blocks_by_district()
+# get_gp_by_district()
+# get_coords_of_polygon_center_of_block()
+# geo_points_test = (
+#     (21.883583, 77.205752),
+#     (23.883583, 80.205752),
+#     (17.883583, 74.205752)
+# )
 
-if __name__ == '__main__':
+# geo_points_test = tuple((x, y) for x in np.arange(20, 21, 0.25) for y in np.arange(77, 78, 0.25))
+# start_date = '1990-01-01'
+# end_date = '1990-01-03'
+#
+# weather = get_history_weather(geo_points=geo_points_test, start_date=start_date, end_date=end_date,
+#                               out_format='csv')
 
-    # geo_points_test = (
-    #     (21.883583, 77.205752),
-    #     (23.883583, 80.205752),
-    #     (17.883583, 74.205752)
-    # )
-
-    geo_points_test = tuple((x, y) for x in np.arange(20, 21, 0.25) for y in np.arange(77, 78, 0.25))
-    start_date = '1990-01-01'
-    end_date = '1990-01-03'
-
-    weather = get_history_weather(geo_points=geo_points_test, start_date=start_date, end_date=end_date,
-                                  out_format='csv')
-
-    # weather = weather.set_index(['latitude', 'longitude'])
-    # print(weather.head(10).to_string())
+# weather = weather.set_index(['latitude', 'longitude'])
+# print(weather.head(10).to_string())
