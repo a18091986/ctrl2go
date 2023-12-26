@@ -24,7 +24,7 @@ def get_list_of_districts_ids(project_title: str = 'Rabi 2022-23') -> list[str, 
     # print(json.dumps(response.json(), indent=3))
 
 
-district_ids = get_list_of_districts_ids()
+# district_ids = get_list_of_districts_ids()
 
 
 def get_blocks_by_district(district_ids: list[str, ...]) -> pd.DataFrame:
@@ -49,7 +49,7 @@ def get_blocks_by_district(district_ids: list[str, ...]) -> pd.DataFrame:
     return result_df
 
 
-print(get_blocks_by_district(district_ids).shape)
+# print(get_blocks_by_district(district_ids).shape)
 
 
 def get_coords_of_polygon_center_of_block():
@@ -60,6 +60,7 @@ def get_coords_of_polygon_center_of_block():
     }
     payload = {}
     response = requests.request("GET", url, headers=headers, data=payload)
+    print(response.url)
     print(pd.DataFrame(response.json()))
 
 
@@ -141,11 +142,12 @@ def get_history_weather(datamode: str = 'bilinear', src_id: int = 2,
     weather_hist.to_csv(Path(dir_to_save, f"weather_{datetime.now().strftime('%Y%m%d__%H%M%S')}.csv"))
     return weather_hist
 
+
 # if __name__ == '__main__':
 # get_districts()
 # get_blocks_by_district()
 # get_gp_by_district()
-# get_coords_of_polygon_center_of_block()
+get_coords_of_polygon_center_of_block()
 # geo_points_test = (
 #     (21.883583, 77.205752),
 #     (23.883583, 80.205752),
