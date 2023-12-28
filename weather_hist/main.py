@@ -12,19 +12,52 @@ env = dotenv.dotenv_values('../.env')
 auth_key = env.get("AUTH_TOKEN")
 
 
-def get_list_of_districts_ids(project_title: str = 'Rabi 2022-23') -> list[str, ...]:
-    url = f"http://45.89.26.151:3001/api/projectsJSON?namep={project_title}"
+# TO_DO:
+# 1. Объединить методы получения из базы в класс?
+# 2. Добавить описание функций
+# 3. Разобраться почему не по всем блокам загружаются координаты
+# 4. Сделать дашборд, отработать обновление по расписанию
+
+
+# def get_gp_by_district():
+#     url = "http://45.89.26.151:3001/api/grams?idd=437"
+#     headers = {
+#         'comp_name': 'WP',
+#         'Authorization': f'Bearer {auth_key}'
+#     }
+#     payload = {}
+#     response = requests.request("GET", url, headers=headers, data=payload)
+#     # print(json.dumps(response.json(), indent=3))
+#     print(pd.DataFrame(response.json().get('grams')))
+#
+# def get_coords_of_polygon_center_of_gp():
+#     url = "http://45.89.26.151:3001/api/grams?idd=437"
+#     headers = {
+#         'comp_name': 'WP',
+#         'Authorization': f'Bearer {auth_key}'
+#     }
+#     payload = {}
+#     response = requests.request("GET", url, headers=headers, data=payload)
+#     # print(json.dumps(response.json(), indent=3))
+#     print(pd.DataFrame(response.json().get('grams')))
+
+def get_subprojects(project_id: str) -> pd.DataFrame:
+    subprojects = pd.DataFrame()
+
+    base_url = "http://45.89.26.151:3001/api/subprojects"
+    url = '?'.join([base_url, f"idp={project_id}"])
     headers = {
         'comp_name': 'WP',
         'Authorization': f'Bearer {auth_key}'
     }
     payload = {}
     response = requests.request("GET", url, headers=headers, data=payload)
-    return [x.get('code_devision') for x in response.json().get('projects')[0].get('atd_units')]
-    # print(json.dumps(response.json(), indent=3))
 
+    if response.status_code != 200:
+        raise Exception(f"\n{'*' * 100}\nError: Unable to get subprojects. {response.content}\n{'*' * 100}")
 
-# district_ids = get_list_of_districts_ids()
+    subprojects = pd.DataFrame(response.json().get('subprojects'))
+    return subprojects
 
 
 def get_blocks_by_district(district_ids: list[str, ...]) -> pd.DataFrame:
@@ -46,49 +79,44 @@ def get_blocks_by_district(district_ids: list[str, ...]) -> pd.DataFrame:
             continue
         result_df = pd.concat([result_df, pd.DataFrame(response.json().get('blocks'))], ignore_index=True)
 
+    if result_df.empty:
+        raise Exception(f"\n{'*' * 100}\nError: empty result blocks dataframe.\n{'*' * 100}")
     return result_df
 
 
-# print(get_blocks_by_district(district_ids).shape)
+def get_coords_of_polygon_center_of_blocks(block_ids: list[str, ...]) -> pd.DataFrame:
+    result_df = pd.DataFrame()
 
-
-def get_coords_of_polygon_center_of_block():
-    url = "http://45.89.26.151:3001/api/polycenter?idb=4045"
+    base_url = "http://45.89.26.151:3001/api/polycenter"
     headers = {
         'comp_name': 'WP',
         'Authorization': f'Bearer {auth_key}'
     }
     payload = {}
-    response = requests.request("GET", url, headers=headers, data=payload)
-    print(response.url)
-    print(pd.DataFrame(response.json()))
+    for b_id in block_ids:
+        url = '?'.join([base_url, f"idb={b_id}"])
+        response = requests.request("GET", url, headers=headers, data=payload)
+        if response.status_code != 200:
+            print(f"Error: Unable to get polygon coords by block id for {b_id}. {response.content}")
+            continue
+        if result_df.empty:
+            result_df = pd.DataFrame(response.json())
+            result_df['latitude'] = str(round(float(result_df.loc['lat', 'point']), 5))
+            result_df['longitude'] = str(round(float(result_df.loc['lon', 'point']), 5))
+            result_df = pd.DataFrame(result_df.loc['lat', :]).T.reset_index(drop=True)
+            continue
 
+        current_df = pd.DataFrame(response.json())
+        current_df['latitude'] = str(round(float(current_df.loc['lat', 'point']), 5))
+        current_df['longitude'] = str(round(float(current_df.loc['lon', 'point']), 5))
+        current_df = pd.DataFrame(current_df.loc['lat', :]).T.reset_index(drop=True)
+        result_df = pd.concat([result_df, current_df])
 
-# def get_gp_by_district():
-#     url = "http://45.89.26.151:3001/api/grams?idd=437"
-#     headers = {
-#         'comp_name': 'WP',
-#         'Authorization': f'Bearer {auth_key}'
-#     }
-#     payload = {}
-#     response = requests.request("GET", url, headers=headers, data=payload)
-#     # print(json.dumps(response.json(), indent=3))
-#     print(pd.DataFrame(response.json().get('grams')))
-
-# def get_coords_of_polygon_center_of_gp():
-#     url = "http://45.89.26.151:3001/api/grams?idd=437"
-#     headers = {
-#         'comp_name': 'WP',
-#         'Authorization': f'Bearer {auth_key}'
-#     }
-#     payload = {}
-#     response = requests.request("GET", url, headers=headers, data=payload)
-#     # print(json.dumps(response.json(), indent=3))
-#     print(pd.DataFrame(response.json().get('grams')))
+    return result_df.reset_index(drop=True)
 
 
 def get_history_weather(datamode: str = 'bilinear', src_id: int = 2,
-                        geo_points: Tuple[Tuple[float | int, float | int], ...] = ((28.632854, 77.219721),),
+                        geo_points: Tuple[Tuple[str, str], ...] = (("28.632854", "77.219721"),),
                         start_date: str = "1990-01-01", end_date: str = "1990-01-03",
                         out_format: str = 'csv') -> pd.DataFrame | None:
     """
@@ -106,8 +134,6 @@ def get_history_weather(datamode: str = 'bilinear', src_id: int = 2,
 
     """
     weather_hist = pd.DataFrame()
-    dir_to_save = Path("out_data")
-    dir_to_save.mkdir(exist_ok=True)
 
     base_url = "http://212.41.22.36:8084/meteo/api/v1/webportal/ptDailyMeteoData"
     parameters = f"srcId={src_id}&dataMode={datamode}&startDate={start_date}&endDate={end_date}"
@@ -131,35 +157,73 @@ def get_history_weather(datamode: str = 'bilinear', src_id: int = 2,
     weather_hist = pd.DataFrame.from_records(response.json())
     weather_hist = weather_hist.loc[:, ~weather_hist.columns.isin(['sourceId', 'isInterpolated'])]
 
-    if out_format == 'xlsx':
-        weather_hist.to_excel(Path(dir_to_save, f"weather_{datetime.now().strftime('%Y%m%d__%H%M%S')}.xlsx"))
-        exit()
-
-    elif out_format == 'sql':
-        pass
-        exit()
-
-    weather_hist.to_csv(Path(dir_to_save, f"weather_{datetime.now().strftime('%Y%m%d__%H%M%S')}.csv"))
     return weather_hist
 
+    # if out_format == 'xlsx':
+    #     weather_hist.to_excel(Path(dir_to_save, f"weather_{datetime.now().strftime('%Y%m%d__%H%M%S')}.xlsx"))
+    #     exit()
+    #
+    # elif out_format == 'sql':
+    #     pass
+    #     exit()
+    #
+    # weather_hist.to_csv(Path(dir_to_save, f"weather_{datetime.now().strftime('%Y%m%d__%H%M%S')}.csv"))
 
-# if __name__ == '__main__':
-# get_districts()
-# get_blocks_by_district()
-# get_gp_by_district()
-get_coords_of_polygon_center_of_block()
-# geo_points_test = (
-#     (21.883583, 77.205752),
-#     (23.883583, 80.205752),
-#     (17.883583, 74.205752)
-# )
 
-# geo_points_test = tuple((x, y) for x in np.arange(20, 21, 0.25) for y in np.arange(77, 78, 0.25))
-# start_date = '1990-01-01'
-# end_date = '1990-01-03'
-#
-# weather = get_history_weather(geo_points=geo_points_test, start_date=start_date, end_date=end_date,
-#                               out_format='csv')
+if __name__ == '__main__':
+    dir_to_save = Path("out_data")
+    dir_to_save.mkdir(exist_ok=True)
+    ID_PROJECT = '12'
+    START_DATE = '1990-01-01'
+    END_DATE = '1990-01-04'
 
-# weather = weather.set_index(['latitude', 'longitude'])
-# print(weather.head(10).to_string())
+    subprojects_df = get_subprojects(project_id=ID_PROJECT)
+    subprojects_df = subprojects_df[['id_subproject', 'id_atd']].rename(columns={'id_atd': "distrCode"})
+    district_ids_list = subprojects_df['distrCode'].to_list()  # == atd_ids
+
+    blocks_df = get_blocks_by_district(district_ids_list)
+
+    subprojects_districts_blocks_df = subprojects_df.merge(blocks_df, on='distrCode', how='left')
+
+    blocks_list = subprojects_districts_blocks_df['BlockCode'].to_list()
+
+    blocks_with_coords_df = get_coords_of_polygon_center_of_blocks(blocks_list)[['name', 'latitude', 'longitude']]
+
+    geo_df = subprojects_districts_blocks_df.merge(blocks_with_coords_df,
+                                                   left_on='Blockname', right_on='name', how='left')
+
+    geo_df = geo_df[[x for x in geo_df.columns if x not in ['BlockAltNames', 'mrdcode', 'distrCode',
+                                                            'stateCode', 'name', 'BlockCode']]]
+    geo_df.loc[:, ['latitude', 'longitude']] = geo_df.loc[:, ['latitude', 'longitude']].astype(float)
+
+    geo_points = tuple((x[0], x[1]) for x in
+                       geo_df.loc[:, ['latitude', 'longitude']].values.tolist()
+                       if not np.isnan(float(x[0])))
+
+    weather_history_df = get_history_weather(geo_points=geo_points,
+                                             start_date=START_DATE, end_date=END_DATE,
+                                             out_format='csv')
+
+    final = weather_history_df.merge(geo_df, on='latitude', how='left') \
+        .drop(columns=['longitude_y']) \
+        .rename(columns={'longitude_x': 'Longitude',
+                         'latitude': 'Latitude',
+                         'date': 'Date',
+                         'meanTemperature': 'Average temperature',
+                         'minimalTemperature': 'Minimum temperature',
+                         'maximalTemperature': 'Maximum temperature',
+                         'precipitation': 'Total precipitation',
+                         'relativeHumidity': 'Relative humidity',
+                         'id_subproject': 'Subproject',
+                         'distr': 'District',
+                         'Blockname': 'Block',
+                         'state': 'State'})
+
+    final = final[['Latitude', 'Longitude', 'Subproject', 'State', 'District', 'Block', 'Date',
+                   'Average temperature', 'Maximum temperature', 'Minimum temperature',
+                   'Total precipitation', 'Relative humidity']]
+
+    final.to_csv(Path(dir_to_save, f"weather_hist_{datetime.now().strftime('%Y%m%d__%H%M%S')}.csv"))
+    final.to_excel(Path(dir_to_save, f"weather_hist_{datetime.now().strftime('%Y%m%d__%H%M%S')}.xlsx"))
+    # final = final.set_index(['Latitude', 'Longitude'])
+    # print(final.to_string())
