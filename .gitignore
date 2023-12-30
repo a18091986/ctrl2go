@@ -5,3 +5,4 @@ venv
 .xlsx
 out_data
 postman
+__pycache__
