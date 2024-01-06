@@ -1,3 +1,5 @@
+import json
+
 from fastapi import FastAPI, Query
 import datetime as dt
 import xarray as xr
@@ -11,18 +13,50 @@ GFS_BASE = "https://nomads.ncep.noaa.gov/dods"
 
 
 # функция обращается к серверу и собирает датасет из последних доступных массивов прогноза погоды
-def get_gfs(date: dt.date, varlist: list, run: int = 0, hour: int = None, res: str = "0p25"):
+# подгрузка прогноза на 14 дней с шагом в 3 часа
+def get_gfs_3hr(date: dt.date, varlist: list, run: int = 0, hour: int = None, res: str = "0p25"):
     date_str = date.strftime("%Y%m%d")
     url_base = f"{GFS_BASE}/gfs_{res}/gfs{date_str}"
-
     response = requests.head(url_base)
-    if response.status_code != 200:  # если на текущую дату не расчитана модель, то он смотрит по предыдущему дню
+
+    # если на текущую дату не расчитана модель, то он смотрит по предыдущему дню
+    if response.status_code != 200:
         date = date - dt.timedelta(days=1)
         date_str = date.strftime("%Y%m%d")
         url_base = f"{GFS_BASE}/gfs_{res}/gfs{date_str}"
 
-    for run in reversed(range(0, 24,
-                              6)):  # модели расчитываются в 0, 6, 12, 18 часов. Поэотму идет итерация от самой поздней с шагом 6 часов
+    # модели расчитываются в 0, 6, 12, 18 часов. Поэотму идет итерация от самой поздней с шагом 6 часов
+    for run in reversed(range(0, 24, 6)):
+        url = f"{url_base}/gfs_{res}_{run:02d}z"
+        print(url)
+        try:
+            with xr.open_dataset(url) as ds:
+                if hour is None:
+                    dataset = ds[varlist]
+                else:
+                    time = dt.time(hour=hour)
+                    dataset = ds[varlist].sel(
+                        time=dt.datetime.combine(date, time), method="nearest"
+                    )
+            return dataset
+        except:
+            continue
+
+    raise Exception("Data could not be retrieved for the specified date and run times")
+
+
+# подгрузка прогноза на 4 дня с шагом в час
+def get_gfs_1hr(date: dt.date, varlist: list, run: int = 0, hour: int = None, res: str = "0p25_1hr"):
+    date_str = date.strftime("%Y%m%d")
+    url_base = f"{GFS_BASE}/gfs_{res}/gfs{date_str}"
+
+    response = requests.head(url_base)
+    if response.status_code != 200:
+        date = date - dt.timedelta(days=1)
+        date_str = date.strftime("%Y%m%d")
+        url_base = f"{GFS_BASE}/gfs_{res}/gfs{date_str}"
+
+    for run in reversed(range(0, 24, 6)):
         url = f"{url_base}/gfs_{res}_{run:02d}z"
         try:
             with xr.open_dataset(url) as ds:
@@ -41,22 +75,7 @@ def get_gfs(date: dt.date, varlist: list, run: int = 0, hour: int = None, res: s
     raise Exception("Data could not be retrieved for the specified date and run times")
 
 
-# print(dt.datetime.now().date())
-# print(get_gfs(date=dt.datetime.now().date(), varlist=['tmp2m'], run = 0, hour = None, res = "0p25"))
-
-@app.get("/short_forecast")
-async def get_forecast(
-        lat: float = Query(..., alias="lat"),
-        lon: float = Query(..., alias="lon")
-):
-    # Assume the forecast starts from today
-    date = dt.date.today()
-
-    variables = ["tmp2m", "pratesfc", "rh2m", "dswrfsfc", "ugrd10m", "vgrd10m"]
-
-    # Get the data
-    ds = get_gfs(date, variables)
-
+def prepare_df(ds: xr, lat: float, lon: float) -> pd.DataFrame:
     if (lat % 0.25 == 0) and (lon % 0.25 == 0):
         data = ds.sel(
             lat=lat,
@@ -96,12 +115,41 @@ async def get_forecast(
     data_df['time'] = data_df['time'].dt.strftime('%Y-%m-%d %H:%M')
     data_df = data_df.reindex(columns=['lat', 'lon', 'time', 'temp', 'prec', 'rh', 'rad', 'wind_speed', 'wind_dir'])
 
+    return data_df
+
+
+@app.get("/short_forecast")
+async def get_forecast(
+        lat: float = Query(..., alias="lat"),
+        lon: float = Query(..., alias="lon")
+):
+    # Assume the forecast starts from today
+
+    date = dt.date.today()
+    variables = ["tmp2m", "pratesfc", "rh2m", "dswrfsfc", "ugrd10m", "vgrd10m"]
+    ds1hr = get_gfs_1hr(date, variables)
+    ds3hr = get_gfs_3hr(date, variables)
+
+    df1hr = prepare_df(ds1hr, lat, lon)
+    df3hr = prepare_df(ds3hr, lat, lon)
+
+    # определяем максимальную временную отметку на которую есть данные в часовом датафрейме
+    max_dt_from_df1 = df1hr.time.max()
+    # Формируем обобщенный датафрейм присоединяя к часовому датафрейму трехчасовой с временной отметки, отсутствующей
+    # в часовом
+    data_df = pd.concat([df1hr, df3hr.loc[df3hr['time'] > max_dt_from_df1]]).reset_index(drop=True)
+    # print(data_df.to_string())
+
     # data_df['rad'] = (data_df['rad'] * 10800) / 1000000
     response = data_df.to_dict(orient='records')
+
+    # for el in response:
+    #     print(el)
 
     return response
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="localhost", port=8092)
